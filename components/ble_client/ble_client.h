@@ -68,13 +68,13 @@ class BLEClient : public BLEClientBase {
   bool enabled;
 
   void set_state(espbt::ClientState state) override;
-
-// NEW: runtime MAC change with safe reconnect
+ 
+ // NEW: runtime MAC change with safe reconnect
  bool set_address(const std::string &addr) {
-   bool was_enabled = this->enabled;
-   this->set_enabled(false);                 // disconnect if needed
+   bool was_enabled = this->enabled;   // this member exists in your header
+   this->set_enabled(false);           // drop connection if active
    bool ok = this->BLEClientBase::set_target_address(addr);
-   this->set_enabled(was_enabled);           // reconnect if previously enabled
+   this->set_enabled(was_enabled);     // reconnect if previously enabled
    return ok;
  }
 
