@@ -60,3 +60,5 @@ switch:
     ble_client_id: client0
     id: ble_client_switch0
     name: "${bms0} enable bluetooth connection"
+
+<img width="436" height="110" alt="image" src="https://github.com/user-attachments/assets/ca2d8406-fd81-4521-b2ee-240a03bc06f0" />
