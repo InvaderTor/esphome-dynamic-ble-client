@@ -4,6 +4,7 @@
 
 #include "esphome/components/esp32_ble_tracker/esp32_ble_tracker.h"
 #include "esphome/core/component.h"
+#include "esphome/core/log.h"
 
 #ifdef USE_ESP32_BLE_DEVICE
 #include "ble_service.h"
@@ -102,16 +103,51 @@ class BLEClientBase : public espbt::ESPBTClient, public Component {
 
   // NEW: runtime target MAC setter
   bool set_target_address(const std::string &addr) {
-    auto maybe = esphome::esp32_ble_tracker::parse_device_address(addr);
-    if (!maybe.has_value()) {
-      ESP_LOGE("ble_client", "Invalid BLE MAC: %s", addr.c_str());
-      return false;
-    }
-    this->address_ = *maybe;
-    this->address_str_ = addr;
-    ESP_LOGI("ble_client", "BLE target address set to %s", addr.c_str());
-    return true;
-  }
+   // Try modern API if present: ESPBTDeviceAddress::from_string()
+   using esphome::esp32_ble_tracker::ESPBTDeviceAddress;
+   #if __cpp_if_consteval
+   #endif
+   // Prefer a static factory if it exists
+   #ifdef ESPHOME_HAS_ESPBTDEVICEADDRESS_FROM_STRING
+   auto maybe = ESPBTDeviceAddress::from_string(addr);
+   if (!maybe.has_value()) {
+     ESP_LOGE("ble_client", "Invalid BLE MAC: %s", addr.c_str());
+     return false;
+   }
+   this->address_ = *maybe;
+   this->address_str_ = addr;
+   ESP_LOGI("ble_client", "BLE target address set to %s", addr.c_str());
+   return true;
+   #else
+   // Fallback: simple parser for colon-separated MAC -> 6 bytes
+   uint8_t bytes[6] = {0};
+   int bi = 0;
+   uint32_t acc = 0;
+   int nyb = 0;
+   for (char c : addr) {
+     if (c == ':' || c == '-') {
+       if (nyb == 2 && bi < 6) { bytes[bi++] = uint8_t(acc); acc = 0; nyb = 0; }
+       else if (nyb != 0) { ESP_LOGE("ble_client", "Invalid BLE MAC: %s", addr.c_str()); return false; }
+       continue;
+     }
+     uint8_t v;
+     if (c >= '0' && c <= '9') v = c - '0';
+     else if (c >= 'a' && c <= 'f') v = 10 + (c - 'a');
+     else if (c >= 'A' && c <= 'F') v = 10 + (c - 'A');
+     else { ESP_LOGE("ble_client", "Invalid BLE MAC: %s", addr.c_str()); return false; }
+     acc = (acc << 4) | v;
+     if (++nyb == 2) { if (bi >= 6) { ESP_LOGE("ble_client", "Invalid BLE MAC: %s", addr.c_str()); return false; } bytes[bi++] = uint8_t(acc); acc = 0; nyb = 0; }
+   }
+   if (bi != 6 || nyb != 0) { ESP_LOGE("ble_client", "Invalid BLE MAC: %s", addr.c_str()); return false; }
+
+   // Construct an ESPHome address from 6 bytes:
+   // Most ESPHome builds have a constructor from uint64 or array; try array ctor.
+   this->address_ = ESPBTDeviceAddress(bytes);   // matches 2025.7.5
+   this->address_str_ = addr;
+   ESP_LOGI("ble_client", "BLE target address set to %s", addr.c_str());
+   return true;
+   #endif
+ }
 
  protected:
   // Memory optimized layout for 32-bit systems
