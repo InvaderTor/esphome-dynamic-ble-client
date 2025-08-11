@@ -71,8 +71,8 @@ class BLEClient : public BLEClientBase {
   void set_state(espbt::ClientState state) override;
 
  // This is the patch start
-// inside class BLEClient (public:)
-bool set_address(const std::string &addr_str) {
+// --- Added: runtime MAC change from string without clashing with core ---
+bool set_address_str(const std::string &addr_str) {
   // Parse "AA:BB:CC:DD:EE:FF" into 6 bytes
   uint8_t mac[6] = {0};
   int bi = 0, nyb = 0;
@@ -97,16 +97,13 @@ bool set_address(const std::string &addr_str) {
   if (bi != 6 || nyb != 0) return false;
 
   bool was_enabled = this->enabled;
-  this->set_enabled(false);  // cleanly disconnect if needed
+  this->set_enabled(false);                 // cleanly disconnect
 
-  // These members are defined in BLEClientBase for this ESPHome version:
-  //   - uint8_t remote_bda_[6];
-  //   - std::string address_str_;
-  // If your member names differ, search in ble_client_base.h and adjust.
+  // These member names come from the upstream base; adjust only if yours differ
   std::memcpy(this->remote_bda_, mac, sizeof(mac));
   this->address_str_ = addr_str;
 
-  this->set_enabled(was_enabled);  // reconnect if it was enabled
+  this->set_enabled(was_enabled);           // reconnect if it was enabled
   return true;
 }
 
