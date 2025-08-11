@@ -14,6 +14,7 @@
 #include <array>
 #include <string>
 #include <vector>
+#include <cstring>
 
 namespace esphome {
 namespace ble_client {
@@ -69,18 +70,47 @@ class BLEClient : public BLEClientBase {
 
   void set_state(espbt::ClientState state) override;
 
- // keep this inside class BLEClient (public:)
- bool set_address(const std::string &addr_str) {
-   bool was_enabled = this->enabled;   // remember current state
-   this->set_enabled(false);           // disconnect if needed
+ // This is the patch start
+// inside class BLEClient (public:)
+bool set_address(const std::string &addr_str) {
+  // Parse "AA:BB:CC:DD:EE:FF" into 6 bytes
+  uint8_t mac[6] = {0};
+  int bi = 0, nyb = 0;
+  uint8_t acc = 0;
+  for (char c : addr_str) {
+    if (c == ':' || c == '-') {
+      if (nyb == 2 && bi < 6) { mac[bi++] = acc; acc = 0; nyb = 0; }
+      else if (nyb != 0) return false;
+      continue;
+    }
+    uint8_t v;
+    if      (c >= '0' && c <= '9') v = c - '0';
+    else if (c >= 'a' && c <= 'f') v = 10 + (c - 'a');
+    else if (c >= 'A' && c <= 'F') v = 10 + (c - 'A');
+    else return false;
+    acc = (acc << 4) | v;
+    if (++nyb == 2) {
+      if (bi >= 6) return false;
+      mac[bi++] = acc; acc = 0; nyb = 0;
+    }
+  }
+  if (bi != 6 || nyb != 0) return false;
 
-   // this updates address_ and address_str_ and returns validity
-   bool ok = this->check_addr(addr_str);
+  bool was_enabled = this->enabled;
+  this->set_enabled(false);  // cleanly disconnect if needed
 
-   this->set_enabled(was_enabled);     // reconnect if it was enabled
-   return ok;
- }
+  // These members are defined in BLEClientBase for this ESPHome version:
+  //   - uint8_t remote_bda_[6];
+  //   - std::string address_str_;
+  // If your member names differ, search in ble_client_base.h and adjust.
+  std::memcpy(this->remote_bda_, mac, sizeof(mac));
+  this->address_str_ = addr_str;
 
+  this->set_enabled(was_enabled);  // reconnect if it was enabled
+  return true;
+}
+
+// This is the patch end
 
  protected:
   bool all_nodes_established_();
