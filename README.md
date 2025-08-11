@@ -13,9 +13,7 @@ Overrides ESPHome BLE client headers to allow setting the target MAC address at 
 external_components:
   - source:
       type: git
-      url: https://github.com/<your-username>/esphome-dynamic-ble-client
-    refresh: 0s
-  - source: github://syssi/esphome-jk-bms@main
+      url: https://github.com/InvaderTor/esphome-dynamic-ble-client
     refresh: 0s
 
 ble_client:
