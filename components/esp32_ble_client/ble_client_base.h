@@ -5,7 +5,6 @@
 #include "esphome/components/esp32_ble_tracker/esp32_ble_tracker.h"
 #include "esphome/core/component.h"
 
-#include "esphome/components/esp32_ble_tracker/ble_address.h"  // <-- brings ESPBTDeviceAddress
 #include "esphome/core/log.h"
 
 #include "ble_service.h"
