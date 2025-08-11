@@ -4,11 +4,11 @@
 
 #include "esphome/components/esp32_ble_tracker/esp32_ble_tracker.h"
 #include "esphome/core/component.h"
+
+#include "esphome/components/esp32_ble_tracker/ble_address.h"  // <-- brings ESPBTDeviceAddress
 #include "esphome/core/log.h"
 
-#ifdef USE_ESP32_BLE_DEVICE
 #include "ble_service.h"
-#endif
 
 #include <array>
 #include <string>
@@ -19,7 +19,8 @@
 #include <esp_gatt_common_api.h>
 #include <esp_gattc_api.h>
 
-namespace esphome::esp32_ble_client {
+namespace esphome {
+namespace esp32_ble_client {
 
 namespace espbt = esphome::esp32_ble_tracker;
 
@@ -33,9 +34,7 @@ class BLEClientBase : public espbt::ESPBTClient, public Component {
   void dump_config() override;
 
   void run_later(std::function<void()> &&f);  // NOLINT
-#ifdef USE_ESP32_BLE_DEVICE
   bool parse_device(const espbt::ESPBTDevice &device) override;
-#endif
   void on_scan_end() override {}
   bool gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
                            esp_ble_gattc_cb_param_t *param) override;
@@ -50,7 +49,7 @@ class BLEClientBase : public espbt::ESPBTClient, public Component {
 
   void set_auto_connect(bool auto_connect) { this->auto_connect_ = auto_connect; }
 
-  virtual void set_address(uint64_t address) {
+  void set_address(uint64_t address) {
     this->address_ = address;
     this->remote_bda_[0] = (address >> 40) & 0xFF;
     this->remote_bda_[1] = (address >> 32) & 0xFF;
@@ -68,9 +67,8 @@ class BLEClientBase : public espbt::ESPBTClient, public Component {
                        (uint8_t) (this->address_ >> 0) & 0xff);
     }
   }
-  const std::string &address_str() const { return this->address_str_; }
+  std::string address_str() const { return this->address_str_; }
 
-#ifdef USE_ESP32_BLE_DEVICE
   BLEService *get_service(espbt::ESPBTUUID uuid);
   BLEService *get_service(uint16_t uuid);
   BLECharacteristic *get_characteristic(espbt::ESPBTUUID service, espbt::ESPBTUUID chr);
@@ -81,7 +79,6 @@ class BLEClientBase : public espbt::ESPBTClient, public Component {
   BLEDescriptor *get_descriptor(uint16_t handle);
   // Get the configuration descriptor for the given characteristic handle.
   BLEDescriptor *get_config_descriptor(uint16_t handle);
-#endif
 
   float parse_char_value(uint8_t *value, uint16_t length);
 
@@ -101,52 +98,39 @@ class BLEClientBase : public espbt::ESPBTClient, public Component {
 
   void set_state(espbt::ClientState st) override;
 
-  // NEW: runtime target MAC setter
-  bool set_target_address(const std::string &addr) {
-   // Try modern API if present: ESPBTDeviceAddress::from_string()
-   using esphome::esp32_ble_tracker::ESPBTDeviceAddress;
-   #if __cpp_if_consteval
-   #endif
-   // Prefer a static factory if it exists
-   #ifdef ESPHOME_HAS_ESPBTDEVICEADDRESS_FROM_STRING
-   auto maybe = ESPBTDeviceAddress::from_string(addr);
-   if (!maybe.has_value()) {
-     ESP_LOGE("ble_client", "Invalid BLE MAC: %s", addr.c_str());
-     return false;
-   }
-   this->address_ = *maybe;
-   this->address_str_ = addr;
-   ESP_LOGI("ble_client", "BLE target address set to %s", addr.c_str());
-   return true;
-   #else
-   // Fallback: simple parser for colon-separated MAC -> 6 bytes
-   uint8_t bytes[6] = {0};
-   int bi = 0;
-   uint32_t acc = 0;
-   int nyb = 0;
-   for (char c : addr) {
-     if (c == ':' || c == '-') {
-       if (nyb == 2 && bi < 6) { bytes[bi++] = uint8_t(acc); acc = 0; nyb = 0; }
-       else if (nyb != 0) { ESP_LOGE("ble_client", "Invalid BLE MAC: %s", addr.c_str()); return false; }
-       continue;
-     }
+ // NEW: runtime target MAC setter (version-agnostic)
+ bool set_target_address(const std::string &addr_str) {
+   // Parse a MAC like "AA:BB:CC:DD:EE:FF" into a 48-bit value
+   uint64_t mac = 0;
+   int nybble = 0;
+   for (char c : addr_str) {
+     if (c == ':' || c == '-') continue;
      uint8_t v;
-     if (c >= '0' && c <= '9') v = c - '0';
+     if      (c >= '0' && c <= '9') v = c - '0';
      else if (c >= 'a' && c <= 'f') v = 10 + (c - 'a');
      else if (c >= 'A' && c <= 'F') v = 10 + (c - 'A');
-     else { ESP_LOGE("ble_client", "Invalid BLE MAC: %s", addr.c_str()); return false; }
-     acc = (acc << 4) | v;
-     if (++nyb == 2) { if (bi >= 6) { ESP_LOGE("ble_client", "Invalid BLE MAC: %s", addr.c_str()); return false; } bytes[bi++] = uint8_t(acc); acc = 0; nyb = 0; }
+     else { ESP_LOGE("ble_client", "Invalid BLE MAC: %s", addr_str.c_str()); return false; }
+     mac = (mac << 4) | v;
+     nybble++;
    }
-   if (bi != 6 || nyb != 0) { ESP_LOGE("ble_client", "Invalid BLE MAC: %s", addr.c_str()); return false; }
+   if (nybble != 12) {
+     ESP_LOGE("ble_client", "Invalid BLE MAC: %s", addr_str.c_str());
+     return false;
+   }
 
-   // Construct an ESPHome address from 6 bytes:
-   // Most ESPHome builds have a constructor from uint64 or array; try array ctor.
-   this->address_ = ESPBTDeviceAddress(bytes);   // matches 2025.7.5
-   this->address_str_ = addr;
-   ESP_LOGI("ble_client", "BLE target address set to %s", addr.c_str());
+   // Build an ESPHome BLE address from the 48-bit value.
+   // ESPHome stores MACs left-aligned in a 64-bit container in big-endian order.
+   uint8_t b[6];
+   for (int i = 0; i < 6; i++) b[5 - i] = uint8_t((mac >> (8 * i)) & 0xFF);
+
+   // Construct using the tracker address type
+   esphome::esp32_ble_tracker::ESPBTDeviceAddress new_addr(
+       b[0], b[1], b[2], b[3], b[4], b[5]);  // ctor with 6 bytes exists in current ESPHome
+
+   this->address_ = new_addr;
+   this->address_str_ = addr_str;
+   ESP_LOGI("ble_client", "BLE target address set to %s", addr_str.c_str());
    return true;
-   #endif
  }
 
  protected:
@@ -156,9 +140,7 @@ class BLEClientBase : public espbt::ESPBTClient, public Component {
 
   // Group 2: Container types (grouped for memory optimization)
   std::string address_str_{};
-#ifdef USE_ESP32_BLE_DEVICE
   std::vector<BLEService *> services_;
-#endif
 
   // Group 3: 4-byte types
   int gattc_if_;
@@ -181,13 +163,9 @@ class BLEClientBase : public espbt::ESPBTClient, public Component {
   // 6 bytes used, 2 bytes padding
 
   void log_event_(const char *name);
-  void log_gattc_event_(const char *name);
-  void restore_medium_conn_params_();
-  void log_gattc_warning_(const char *operation, esp_gatt_status_t status);
-  void log_gattc_warning_(const char *operation, esp_err_t err);
-  void log_connection_params_(const char *param_type);
 };
 
-}  // namespace esphome::esp32_ble_client
+}  // namespace esp32_ble_client
+}  // namespace esphome
 
 #endif  // USE_ESP32
