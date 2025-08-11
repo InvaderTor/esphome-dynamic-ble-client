@@ -69,43 +69,18 @@ class BLEClient : public BLEClientBase {
 
   void set_state(espbt::ClientState state) override;
 
- // NEW: runtime MAC change with safe reconnect (no core base edits needed)
+ // keep this inside class BLEClient (public:)
  bool set_address(const std::string &addr_str) {
-   // Parse AA:BB:CC:DD:EE:FF into 6 bytes
-   uint8_t b[6] = {0};
-   int bi = 0, nyb = 0;
-   uint8_t acc = 0;
-   for (char c : addr_str) {
-     if (c == ':' || c == '-') { 
-       if (nyb == 2 && bi < 6) { b[bi++] = acc; acc = 0; nyb = 0; }
-       else if (nyb != 0) { return false; }
-       continue;
-     }
-     uint8_t v;
-     if      (c >= '0' && c <= '9') v = c - '0';
-     else if (c >= 'a' && c <= 'f') v = 10 + (c - 'a');
-     else if (c >= 'A' && c <= 'F') v = 10 + (c - 'A');
-     else { return false; }
-     acc = (acc << 4) | v;
-     if (++nyb == 2) {
-       if (bi >= 6) return false;
-       b[bi++] = acc; acc = 0; nyb = 0;
-     }
-   }
-   if (bi != 6 || nyb != 0) return false;
+   bool was_enabled = this->enabled;   // remember current state
+   this->set_enabled(false);           // disconnect if needed
 
-   // Reuse the base's protected members (this->address_, this->address_str_)
-   bool was_enabled = this->enabled;   // remember state
-   this->set_enabled(false);           // disconnect if active
-
-   // Construct a new address with 6-byte ctor (current ESPHome)
-   esphome::esp32_ble_tracker::ESPBTDeviceAddress new_addr(b[0], b[1], b[2], b[3], b[4], b[5]);
-   this->address_ = new_addr;
-   this->address_str_ = addr_str;
+   // this updates address_ and address_str_ and returns validity
+   bool ok = this->check_addr(addr_str);
 
    this->set_enabled(was_enabled);     // reconnect if it was enabled
-   return true;
+   return ok;
  }
+
 
  protected:
   bool all_nodes_established_();
