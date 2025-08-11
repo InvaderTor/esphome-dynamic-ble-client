@@ -100,6 +100,19 @@ class BLEClientBase : public espbt::ESPBTClient, public Component {
 
   void set_state(espbt::ClientState st) override;
 
+  // NEW: runtime target MAC setter
+  bool set_target_address(const std::string &addr) {
+    auto maybe = esphome::esp32_ble_tracker::parse_device_address(addr);
+    if (!maybe.has_value()) {
+      ESP_LOGE("ble_client", "Invalid BLE MAC: %s", addr.c_str());
+      return false;
+    }
+    this->address_ = *maybe;
+    this->address_str_ = addr;
+    ESP_LOGI("ble_client", "BLE target address set to %s", addr.c_str());
+    return true;
+  }
+
  protected:
   // Memory optimized layout for 32-bit systems
   // Group 1: 8-byte types
