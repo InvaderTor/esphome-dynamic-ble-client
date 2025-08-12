@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 #include <cstring>
+#include <cstdint>
+
 
 namespace esphome {
 namespace ble_client {
@@ -71,7 +73,7 @@ class BLEClient : public BLEClientBase {
   void set_state(espbt::ClientState state) override;
 
  // This is the patch start
-// --- Added: runtime MAC change from string (no clash with core) ---
+// inside class BLEClient (public:)
 bool set_address_str(const std::string &addr_str) {
   // Parse "AA:BB:CC:DD:EE:FF" into 6 bytes
   uint8_t mac[6] = {0};
@@ -96,16 +98,17 @@ bool set_address_str(const std::string &addr_str) {
   }
   if (bi != 6 || nyb != 0) return false;
 
+  // Pack bytes into uint64 in the same order ESPHome uses for 0xAABBCCDDEEFFULL
+  uint64_t packed = 0;
+  for (int i = 0; i < 6; i++) {
+    packed = (packed << 8) | mac[i];
+  }
+
   bool was_enabled = this->enabled;
-  this->set_enabled(false);                 // cleanly disconnect
-
-  // These members are defined in the base for this version:
-  //   uint8_t remote_bda_[6];
-  //   std::string address_str_;
-  std::memcpy(this->remote_bda_, mac, sizeof(mac));
-  this->address_str_ = addr_str;
-
-  this->set_enabled(was_enabled);           // reconnect if it was enabled
+  this->set_enabled(false);          // cleanly disconnect
+  this->set_address(packed);         // <-- call the built-in setter (updates all internals)
+  this->address_str_ = addr_str;     // keep the nice string in sync (optional)
+  this->set_enabled(was_enabled);    // reconnect if it was enabled
   return true;
 }
 
